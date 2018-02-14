@@ -1,0 +1,91 @@
+apply plugin: 'com.android.application'
+apply plugin: 'kotlin-android'
+// Uncomment the next line if using Kotlin Extensions
+// apply plugin: 'kotlin-android-extensions'
+
+ext {
+    appName = 'OMProject'
+    buildOutputPath = file("/${project.rootDir}/${project.name}/build/outputs/apk")
+    keyStore = 'omproject'
+    hockeyAppToken = ""
+    // to enable hockey app uploads from a dev machine set this to true
+    hockeyAppUploadsEnabled = (rootProject.ext.jenkins && hockeyAppToken?.trim())
+}
+
+// Must be called after the project properties are defined
+apply from: 'tasks.gradle'
+
+android {
+    compileSdkVersion 25
+
+    defaultConfig {
+        applicationId 'com.outware.omproject'
+        minSdkVersion 16
+        targetSdkVersion 25
+        versionCode 1
+        versionName '1.0'
+    }
+
+    buildTypes {
+        debug {}
+
+        omqa {
+            versionNameSuffix "-OMQA"
+            minifyEnabled true
+            shrinkResources true
+            debuggable true
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    // Workaround for Android Gradle plugin 3.xx which enables saving of the apk at the same path
+    // as it was in 2.xx. Otherwise, Gradle is creating a separate directory for flavor/buildType.
+    applicationVariants.all { variant ->
+        variant.outputs.all {
+            outputFileName = "../" + outputFileName
+        }
+    }
+}
+
+tasks.whenTaskAdded { task ->
+    if (task.name == 'assembleDebug') {
+        task.mustRunAfter clean
+        task.finalizedBy touchTestReports
+    } else if (task.name == 'assembleOmqa') {
+        task.mustRunAfter clean
+    } else if (task.name == 'assembleRelease') {
+        task.mustRunAfter clean
+    }
+}
+
+// Define dependencies for tasks
+renameOmqaApk.mustRunAfter "assembleOmqa"
+renameReleaseApk.mustRunAfter "assembleRelease"
+
+ext {
+    androidSupportVersion = '25.3.1'
+}
+
+dependencies {
+    compile fileTree(dir: 'libs', include: ['*.jar'])
+    implementation "com.android.support:appcompat-v7:$androidSupportVersion",
+            "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
+
+    testImplementation('junit:junit:4.12')
+    testImplementation('org.robolectric:robolectric:3.4.2') {
+        exclude module: 'junit-dep'
+        exclude module: 'mockito-core'
+    }
+    testImplementation 'org.mockito:mockito-core:2.7.19'
+    testImplementation "org.jetbrains.kotlin:kotlin-test:$kotlin_version"
+}
+
+task archiveArtifacts {
+    dependsOn 'moveApks', 'moveMappingFiles'
+}

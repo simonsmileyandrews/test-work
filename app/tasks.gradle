@@ -1,0 +1,161 @@
+def getGitSha() {
+    return 'git rev-parse --short HEAD'.execute([], project.rootDir).text.trim()
+}
+
+def String generateBaseApkName(versionName) {
+    //Don't want spaces in the file name
+    def sanitisedAppName = project.appName.replaceAll(" ", "-")
+    return "$sanitisedAppName-${versionName}.${System.env.BUILD_NUMBER ?: 0}(${getGitSha()})"
+}
+
+task touchTestReports {
+    //Touch the test result file so that Jenkins won't fail seeing an old test file
+    doLast {
+        def proc  = "touch /${project.rootDir}/app/build/test-results/*.xml".execute();
+        proc.waitFor()
+        println("Test result xml is touched")
+    }
+}
+
+/**
+ * OMQA tasks
+ */
+task renameOmqaApk(type: RenameTask) {
+    buildType = 'omqa'
+}
+task signOmqaApk(type: SignTask) {
+    buildType = 'omqa'
+    dependsOn renameOmqaApk
+}
+task uploadOmqaToHockeyApp(type: UploadTask) {
+    buildType = 'omqa'
+    dependsOn signOmqaApk
+}
+
+/**
+ * Release tasks
+ */
+task renameReleaseApk(type: RenameTask) {
+    buildType = 'release'
+}
+task signReleaseApk(type: SignTask) {
+    buildType = 'release'
+    dependsOn renameReleaseApk
+}
+task uploadReleaseToHockeyApp(type: UploadTask) {
+    buildType = 'release'
+    dependsOn signReleaseApk
+}
+
+[renameOmqaApk, signOmqaApk, uploadOmqaToHockeyApp, renameReleaseApk, signReleaseApk, uploadReleaseToHockeyApp].each {
+    it.doFirst {
+        it.baseApkName = generateBaseApkName(android.defaultConfig.versionName)
+    }
+}
+
+class BuildTypeTask extends DefaultTask {
+    String buildType = 'omqa'
+    String baseApkName = ''
+}
+
+class RenameTask extends BuildTypeTask {
+    @TaskAction
+    def rename() {
+        // list all files in the output directory
+        def names = []
+        project.buildOutputPath.eachFile() { file ->
+        names << file.getName()
+        }
+        println "Listing all files before renaming in ${project.buildOutputPath}: \n " + names
+        String oldName = "${project.buildOutputPath}/${project.name}-${buildType}-unsigned.apk"
+        new File(oldName).renameTo(new File("${project.buildOutputPath}/${baseApkName}-${buildType}-unsigned.apk"))
+    }
+}
+
+class SignTask extends BuildTypeTask {
+    @TaskAction
+    def sign() {
+        // Sign the generated app
+        def unsignedApkPath = "$baseApkName-$buildType-unsigned.apk"
+        def proc= "${System.env.OMSCRIPTS}/CodeSigning/android/signCheckAPK.pl --apk ${unsignedApkPath} --keystore ${project.keyStore}".execute([], (File)project.buildOutputPath)
+        proc.waitFor()
+        def output = proc.in.text
+        println output
+        if ( output.contains("Failed") ) {
+            println "APK signing failed."
+            throw new Exception("APK signing failed.")
+        }
+    }
+}
+
+class UploadTask extends BuildTypeTask {
+    UploadTask() {
+        onlyIf { project.hockeyAppUploadsEnabled }
+    }
+
+    @TaskAction
+    def upload() {
+        // Load release notes into variable
+        def releaseNotesProc = "git log -1 --pretty=%B".execute()
+        releaseNotesProc.waitFor()
+        def releaseNotes = releaseNotesProc.in.text
+        releaseNotes = releaseNotes.replace(" ","&nbsp;").replace("\n","<br>")
+        if ( releaseNotes.length() > 0 ) {
+            println 'Release notes found, using them to upload to HockeyApp'
+        } else {
+            println 'Release notes not found, HockeyApp upload will be without release notes'
+            releaseNotes = ''
+        }
+        // Upload the signed app to Hockey
+        def signedApkPath = "$baseApkName-$buildType-signed-aligned.apk"
+        def proc= "${System.env.OMSCRIPTS}/Jenkins/uploadToHockeyApp.sh -i ${signedApkPath} -f true -a ${project.hockeyAppToken} -n ${releaseNotes}".execute(["JENKINS_PRODUCTION=${System.env.JENKINS_PRODUCTION}"], (File)project.buildOutputPath)
+        proc.waitFor()
+        def output = proc.in.text
+        println(output)
+        if (!output.contains("config_url")) {
+            println "Upload to HockeyApp failed."
+            throw new Exception("Upload to HockeyApp failed")
+        }
+    }
+}
+
+/**
+ * tasks for creating and copying artifacts into 'archives' folder
+ */
+
+task moveAars(type: Copy) {
+    from "${buildDir}/outputs/aar"
+    into rootProject.archivesDir
+
+    rename { String fileName ->
+        "${project.name}.aar"
+    }
+}
+
+task movePoms(type: Copy) {
+    from "${buildDir}/poms"
+    into rootProject.archivesDir
+
+    rename { String fileName ->
+        "${project.name}.pom"
+    }
+}
+
+task moveApks(type: Copy) {
+    from "${buildDir}/outputs/apk"
+    into rootProject.archivesDir
+}
+
+task moveMappingFiles(type: Copy) {
+    if(android.hasProperty('applicationVariants')) {
+        android.applicationVariants.all { variant ->
+            from "${buildDir}/outputs/mapping/${variant.buildType.name}/mapping.txt"
+        }
+    }
+
+    into rootProject.archivesDir
+
+    rename { String fileName ->
+        "${project.name}-mapping.txt"
+    }
+}

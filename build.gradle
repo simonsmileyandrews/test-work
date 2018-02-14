@@ -1,0 +1,36 @@
+buildscript {
+    ext.android_plugin_version = '3.0.1'
+    ext.kotlin_version = '1.2.20'
+
+    repositories {
+        maven {
+              url 'http://artifactory.outware.io/artifactory/jcenter/'
+        }
+        google()
+        jcenter()
+        mavenCentral()
+    }
+
+    dependencies {
+        classpath "com.android.tools.build:gradle:$android_plugin_version"
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+    }
+}
+
+allprojects {
+    repositories {
+        maven {
+              url 'http://artifactory.outware.io/artifactory/jcenter/'
+        }
+        google()
+        jcenter()
+        mavenCentral()
+    }
+}
+
+ext {
+    jenkins = System.env.JENKINS_PRODUCTION == "true"
+    archivesDir = "${rootDir.absolutePath}/archive"
+}
+
+apply from: 'ci.gradle'

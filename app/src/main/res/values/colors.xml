@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- App theme -->
+    <color name="app_colour_primary">#f0f</color>
+    <color name="app_colour_primary_dark">#f07</color>
+
+</resources>

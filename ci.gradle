@@ -1,0 +1,70 @@
+/**
+ * Tasks defined in this file are called by Continuous Integration. They provide a level of
+ * abstraction allowing projects to customise the build process without having to create a custom
+ * job on CI. If additional tasks are required for a particular job (e.g. building the
+ * companion app for OMQA builds) they can be added as additional dependencies.
+ *
+ * NB: dependsOn does not enforce task ordering. If the tasks require an explicit order of
+ * execution then either define dependencies between the tasks themselves or use mustRunAfter.
+ * This article provides some insight into options:
+ * http://trickyandroid.com/gradle-tip-3-tasks-ordering/
+ */
+
+def appModuleName = 'app'
+
+task ciDev {
+    configure {
+        group = 'Continuous Integration'
+        description = "Task called by CI Dev project"
+    }
+
+    dependsOn 'ciClean', 'ciCheck'
+}
+
+task ciOmqa {
+    configure {
+        group = 'Continuous Integration'
+        description = "Task called by CI OMQA project"
+    }
+
+    dependsOn("$appModuleName:clean", "$appModuleName:assembleOmqa", "$appModuleName:uploadOmqaToHockeyApp")
+
+    finalizedBy 'ciArchiveArtifacts'
+}
+
+task ciDropClient {
+    configure {
+        group = 'Continuous Integration'
+        description = "Task called by CI Drop Client project"
+    }
+
+    dependsOn("$appModuleName:clean", "$appModuleName:assembleRelease", "$appModuleName:uploadReleaseToHockeyApp")
+
+    finalizedBy 'ciArchiveArtifacts'
+}
+
+task ciCheck {
+    rootProject.subprojects.each {
+        dependsOn("${it.path}:check")
+    }
+
+    mustRunAfter 'ciClean'
+}
+
+task ciClean {
+    rootProject.subprojects.each {
+        dependsOn("${it.path}:clean")
+    }
+
+    doLast {
+        delete rootProject.archivesDir
+    }
+}
+
+/**
+ * Add additional archiving tasks to this 'dependsOn' set if you need to archive artifacts from other modules.
+ * See tasks.gradle for archiving tasks
+ */
+task ciArchiveArtifacts {
+    dependsOn("$appModuleName:archiveArtifacts")
+}
